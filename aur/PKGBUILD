@@ -13,11 +13,8 @@ conflicts=('mangolib')
 source_x86_64=("mangolib::${url}/releases/download/v${pkgver}/mangolib-linux-amd64")
 source_aarch64=("mangolib::${url}/releases/download/v${pkgver}/mangolib-linux-arm64")
 
-# Update after each release — copy sha256sums from the GitHub release assets:
-#   sha256sum mangolib-linux-amd64  (x86_64)
-#   sha256sum mangolib-linux-arm64  (aarch64)
-sha256sums_x86_64=('SKIP')
-sha256sums_aarch64=('SKIP')
+sha256sums_x86_64=('e43e299e099f81139ffd15c5346ef88aba77dbe78331b181bbc2a639836e2c3f')
+sha256sums_aarch64=('f92207140e72d878d32090cda4453f462198eca0cca3c7463ac4a3ae95be3429')
 
 package() {
     install -Dm755 "${srcdir}/mangolib" "${pkgdir}/usr/bin/mangolib"
