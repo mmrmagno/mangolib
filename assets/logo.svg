@@ -1,0 +1,57 @@
+<svg xmlns="http://www.w3.org/2000/svg" viewBox="0 0 440 110" width="440" height="110">
+  <defs>
+    <radialGradient id="mg" cx="40%" cy="35%" r="62%">
+      <stop offset="0%"   stop-color="#f9e2af"/>
+      <stop offset="50%"  stop-color="#fab387"/>
+      <stop offset="100%" stop-color="#df6a28"/>
+    </radialGradient>
+    <radialGradient id="lg" cx="26%" cy="22%" r="78%">
+      <stop offset="0%"   stop-color="#a6e3a1"/>
+      <stop offset="100%" stop-color="#40a02b"/>
+    </radialGradient>
+    <clipPath id="mc">
+      <path d="M57,16 C76,15 95,32 96,56 C97,80 81,102 57,103 C33,102 17,80 18,56 C19,32 38,17 57,16 Z"/>
+    </clipPath>
+  </defs>
+
+  <rect width="440" height="110" rx="14" fill="#1e1e2e"/>
+
+  <g transform="rotate(-18, 57, 59)">
+
+    <path d="M57,16 C76,15 95,32 96,56 C97,80 81,102 57,103 C33,102 17,80 18,56 C19,32 38,17 57,16 Z"
+          fill="url(#mg)"/>
+
+    <g clip-path="url(#mc)">
+      <ellipse cx="49" cy="28" rx="26" ry="18" fill="#a6e3a1" opacity="0.44"/>
+      <ellipse cx="30" cy="88" rx="20" ry="13" fill="#a6e3a1" opacity="0.28"/>
+
+      <ellipse cx="78" cy="66" rx="24" ry="32" fill="#f38ba8" opacity="0.32"/>
+      <ellipse cx="92" cy="55" rx="11" ry="20" fill="#eba0ac" opacity="0.22"/>
+
+      <ellipse cx="57" cy="100" rx="30" ry="10" fill="#11111b" opacity="0.18"/>
+    </g>
+
+    <ellipse cx="38" cy="38" rx="9" ry="13"
+             fill="rgba(249,226,175,0.22)" transform="rotate(-14 38 38)"/>
+
+    <polyline points="28,58 37,45 47,71 57,40 67,71 77,45 86,58 95,58"
+              fill="none" stroke="#cba6f7" stroke-width="2.8"
+              stroke-linecap="round" stroke-linejoin="round"/>
+
+    <path d="M57,16 C58,8 66,5 72,8" stroke="#585b70" stroke-width="2.5"
+          fill="none" stroke-linecap="round"/>
+
+    <path d="M61,12 C68,3 85,2 85,12 C78,9 69,11 61,12 Z" fill="url(#lg)"/>
+    <line x1="61" y1="12" x2="85" y2="12" stroke="#40a02b" stroke-width="0.8" opacity="0.6"/>
+  </g>
+
+  <text x="118" y="63"
+        font-family="'Helvetica Neue', Helvetica, Arial, sans-serif"
+        font-size="48" letter-spacing="-2">
+    <tspan font-weight="800" fill="#fab387">mango</tspan><tspan font-weight="300" fill="#b4befe">lib</tspan>
+  </text>
+
+  <text x="119" y="82"
+        font-family="'Helvetica Neue', Helvetica, Arial, sans-serif"
+        font-size="12" fill="#9399b2" letter-spacing="1.8">music  ·  download  ·  sync</text>
+</svg>

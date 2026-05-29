@@ -1,0 +1,15 @@
+# Build output
+/mangolib
+dist/
+
+# Go
+*.test
+*.out
+vendor/
+
+# Config with secrets
+config/local.*
+
+# OS
+.DS_Store
+Thumbs.db
