@@ -30,11 +30,12 @@
 ## Features
 
 - **Spotify:** resolves tracks, albums, and playlists via the Spotify Web API, searches YouTube for each track, downloads and tags with authoritative Spotify metadata
-- **YouTube:** direct video or playlist download with progress bars; titles automatically cleaned of channel prefixes and video noise
+- **YouTube:** direct video or playlist download; per-track progress bars for playlists; titles automatically stripped of channel prefixes (`Artist | Title`) and noise (`(Official Video)`, `(Audio)`, etc.)
 - **Native tagging:** writes ID3v2 tags (MP3) and ffmpeg metadata (M4A / FLAC) directly, no external taggers
-- **Cover art:** fetches high-res art from iTunes and MusicBrainz, embeds in tags and writes `cover.jpg` for Rockbox
-- **Library organization:** `Artist / Album / NN. Title.ext` structure enforced with `reorganize`
-- **iPod sync:** rsyncs your library to a Rockbox iPod; bidirectional (PC to iPod or iPod to PC)
+- **Cover art:** fetches 3000×3000 art from iTunes (fallback: MusicBrainz), embeds in tags and writes a square-padded `cover.jpg` per album for Rockbox
+- **Library organization:** `Artist / Album / NN. Title.ext` structure enforced with `reorganize`; `reorganize --clean` fixes existing YouTube title noise
+- **iPod sync:** rsyncs your library to a Rockbox iPod; bidirectional (PC to iPod or iPod to PC); `--dry-run` to preview
+- **Styled terminal UI:** Catppuccin Mocha colours, animated spinners, and progress bars — use `-v` for raw subprocess output
 - **Self-managing:** downloads and updates `yt-dlp` automatically; no Python, no Docker
 
 ---
