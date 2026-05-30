@@ -1,6 +1,7 @@
 package ytdlp
 
 import (
+	"context"
 	"encoding/json"
 	"fmt"
 	"io"
@@ -21,7 +22,6 @@ func BinPath() string {
 }
 
 // Locate finds yt-dlp: first at BinPath(), then anywhere on PATH.
-// Returns the resolved path or an error if not found.
 func Locate() (string, error) {
 	managed := BinPath()
 	if _, err := os.Stat(managed); err == nil {
@@ -48,17 +48,65 @@ func Update() error {
 	return download()
 }
 
-// Run executes yt-dlp with the given arguments, streaming output to the terminal.
+// Run executes yt-dlp with the given arguments.
+// In verbose mode output streams to the terminal; otherwise it is discarded.
 func Run(args ...string) error {
+	return RunContext(context.Background(), args...)
+}
+
+// RunContext is like Run but respects context cancellation.
+func RunContext(ctx context.Context, args ...string) error {
 	bin, err := Locate()
 	if err != nil {
 		return err
 	}
-	cmd := exec.Command(bin, args...)
-	cmd.Stdout = os.Stdout
-	cmd.Stderr = os.Stderr
-	cmd.Stdin = os.Stdin
+	cmd := exec.CommandContext(ctx, bin, args...)
+	if ui.Verbose {
+		cmd.Stdout = os.Stdout
+		cmd.Stderr = os.Stderr
+	} else {
+		cmd.Stdout = io.Discard
+		cmd.Stderr = io.Discard
+	}
 	return cmd.Run()
+}
+
+// PlaylistItem holds metadata for one item from a flat-playlist enumeration.
+type PlaylistItem struct {
+	Title         string
+	ID            string
+	PlaylistTitle string
+}
+
+// FlatPlaylist returns metadata for every item in a playlist without downloading.
+func FlatPlaylist(url string) ([]PlaylistItem, error) {
+	bin, err := Locate()
+	if err != nil {
+		return nil, err
+	}
+	// Print playlist_title, title, and id tab-separated for each entry.
+	cmd := exec.Command(bin,
+		"--flat-playlist",
+		"--print", "%(playlist_title|Unknown Playlist)s\t%(title)s\t%(id)s",
+		url,
+	)
+	out, err := cmd.Output()
+	if err != nil {
+		return nil, fmt.Errorf("flat-playlist: %w", err)
+	}
+
+	var items []PlaylistItem
+	for _, line := range strings.Split(strings.TrimSpace(string(out)), "\n") {
+		parts := strings.SplitN(line, "\t", 3)
+		if len(parts) == 3 && parts[2] != "" {
+			items = append(items, PlaylistItem{
+				PlaylistTitle: parts[0],
+				Title:         parts[1],
+				ID:            parts[2],
+			})
+		}
+	}
+	return items, nil
 }
 
 // Version returns the installed yt-dlp version string.
@@ -123,7 +171,7 @@ func download() error {
 		return err
 	}
 
-	ui.Step(fmt.Sprintf("Downloading yt-dlp %s → %s", rel.TagName, dest))
+	ui.Step(fmt.Sprintf("Downloading yt-dlp %s -> %s", rel.TagName, dest))
 	if err := downloadFile(url, dest); err != nil {
 		return fmt.Errorf("downloading yt-dlp: %w", err)
 	}

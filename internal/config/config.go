@@ -46,8 +46,14 @@ func DefaultPath() string {
 	return filepath.Join(home, ".config", "mangolib", "mangolib.toml")
 }
 
+// ConfigPath can be overridden by the --config flag before Load() is called.
+var ConfigPath string
+
 func Load() (*Config, error) {
-	path := DefaultPath()
+	path := ConfigPath
+	if path == "" {
+		path = DefaultPath()
+	}
 
 	if _, err := os.Stat(path); os.IsNotExist(err) {
 		if err := writeDefaults(path); err != nil {

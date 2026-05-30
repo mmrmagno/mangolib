@@ -2,6 +2,7 @@ package catalog
 
 import (
 	"fmt"
+	"io"
 	"os"
 	"os/exec"
 	"path/filepath"
@@ -10,6 +11,7 @@ import (
 
 	"github.com/bogem/id3v2/v2"
 	"github.com/dhowden/tag"
+	"github.com/mmrmagno/mangolib/internal/ui"
 )
 
 // TrackMeta holds the metadata we care about for organizing and tagging.
@@ -213,12 +215,53 @@ func WriteTagsFFmpeg(path string, meta TrackMeta) error {
 	args = append(args, "-codec", "copy", tmp)
 
 	cmd := exec.Command("ffmpeg", args...)
-	cmd.Stderr = os.Stderr
+	if ui.Verbose {
+		cmd.Stderr = os.Stderr
+	} else {
+		cmd.Stderr = io.Discard
+	}
 	if err := cmd.Run(); err != nil {
 		os.Remove(tmp)
 		return err
 	}
 	return os.Rename(tmp, path)
+}
+
+// WriteCoverFile writes cover art as cover.jpg into albumDir, resized to size x size pixels.
+// Rockbox reads cover.jpg from the track directory rather than embedded ID3 art.
+// If size <= 0 the image is written as-is. Skips if cover.jpg already exists unless force is true.
+func WriteCoverFile(albumDir string, data []byte, size int, force bool) error {
+	p := filepath.Join(albumDir, "cover.jpg")
+	if !force {
+		if _, err := os.Stat(p); err == nil {
+			return nil
+		}
+	}
+
+	tmp, err := os.CreateTemp("", "mangolib-cover-*.jpg")
+	if err != nil {
+		return err
+	}
+	tmpPath := tmp.Name()
+	defer os.Remove(tmpPath)
+	if _, err := tmp.Write(data); err != nil {
+		tmp.Close()
+		return err
+	}
+	tmp.Close()
+
+	if size <= 0 {
+		return os.WriteFile(p, data, 0644)
+	}
+
+	scale := fmt.Sprintf("scale=%d:%d:force_original_aspect_ratio=decrease,pad=%d:%d:(ow-iw)/2:(oh-ih)/2:color=black", size, size, size, size)
+	cmd := exec.Command("ffmpeg", "-y", "-i", tmpPath, "-vf", scale, "-update", "1", p)
+	if ui.Verbose {
+		cmd.Stderr = os.Stderr
+	} else {
+		cmd.Stderr = io.Discard
+	}
+	return cmd.Run()
 }
 
 var unsafePathChars = regexp.MustCompile(`[<>:"/\\|?*\x00-\x1f]`)

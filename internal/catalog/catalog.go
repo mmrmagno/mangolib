@@ -2,13 +2,90 @@ package catalog
 
 import (
 	"fmt"
+	"io"
 	"os"
 	"path/filepath"
+	"regexp"
 	"strings"
 
 	"github.com/mmrmagno/mangolib/internal/config"
 	"github.com/mmrmagno/mangolib/internal/ui"
 )
+
+// YouTube title noise patterns.
+var (
+	ytPipePrefix  = regexp.MustCompile(`^[^|]+\|\s*`)
+	ytNoiseSuffix = regexp.MustCompile(`(?i)\s*[\(\[](official\s*(video|audio|music\s*video|lyric\s*video|tour\s*video)?|audio|lyrics?|hd|hq|4k|vevo|remastered|live|animated\s*video|upscaled)[^\)\]]*[\)\]]`)
+	ytYearSuffix  = regexp.MustCompile(`\s*\(\d{4}\)\s*$`)
+	ytTopicSuffix = regexp.MustCompile(`(?i)\s*-\s*topic\s*$`)
+)
+
+// CleanYouTubeTitle strips common YouTube title noise:
+// channel prefixes ("Artist | Title"), "(Official Video)", "(Audio)", year suffixes, etc.
+func CleanYouTubeTitle(title string) string {
+	title = ytPipePrefix.ReplaceAllString(title, "")
+	title = ytNoiseSuffix.ReplaceAllString(title, "")
+	title = ytYearSuffix.ReplaceAllString(title, "")
+	title = ytTopicSuffix.ReplaceAllString(title, "")
+	return strings.TrimSpace(title)
+}
+
+// CleanLibraryTitles walks the library, applies CleanYouTubeTitle to every track's
+// title tag, and renames files via OrganizeFile. Use after messy YouTube downloads.
+func CleanLibraryTitles(cfg *config.Config) error {
+	cleaned, skipped, failed := 0, 0, 0
+
+	err := filepath.Walk(cfg.MusicLibrary, func(path string, info os.FileInfo, err error) error {
+		if err != nil || info.IsDir() {
+			return err
+		}
+		ext := strings.ToLower(filepath.Ext(path))
+		if !audioExts[ext] {
+			return nil
+		}
+
+		meta := ReadTags(path)
+		original := meta.Title
+		meta.Title = CleanYouTubeTitle(meta.Title)
+
+		if meta.Title == original {
+			skipped++
+			return nil
+		}
+
+		switch ext {
+		case ".mp3":
+			if err := WriteTagsMP3(path, meta); err != nil {
+				ui.Warn(fmt.Sprintf("tag write failed: %s", filepath.Base(path)))
+				failed++
+				return nil
+			}
+		default:
+			if err := WriteTagsFFmpeg(path, meta); err != nil {
+				ui.Warn(fmt.Sprintf("tag write failed: %s", filepath.Base(path)))
+				failed++
+				return nil
+			}
+		}
+
+		dest, err := OrganizeFile(path, cfg.MusicLibrary, meta)
+		if err != nil {
+			ui.Warn(fmt.Sprintf("rename failed: %s", filepath.Base(path)))
+			failed++
+			return nil
+		}
+		ui.Success(fmt.Sprintf("%s -> %s", original, filepath.Base(dest)))
+		cleaned++
+		return nil
+	})
+	if err != nil {
+		return err
+	}
+
+	_ = RemoveEmptyDirs(cfg.MusicLibrary)
+	ui.Success(fmt.Sprintf("done: %d titles cleaned, %d unchanged, %d failed", cleaned, skipped, failed))
+	return nil
+}
 
 var audioExts = map[string]bool{
 	".mp3": true, ".m4a": true, ".flac": true,
@@ -26,7 +103,6 @@ func Import(cfg *config.Config, srcDir string) error {
 // ScanAndTag walks the library and re-organizes any file not already in the
 // correct Artist/Album/NN. Title.ext location. Used by `mangolib init`.
 func ScanAndTag(cfg *config.Config) error {
-	ui.Step("Scanning library...")
 	moved, skipped, failed := 0, 0, 0
 
 	err := filepath.Walk(cfg.MusicLibrary, func(path string, info os.FileInfo, err error) error {
@@ -78,7 +154,7 @@ func ScanAndTag(cfg *config.Config) error {
 	}
 
 	_ = RemoveEmptyDirs(cfg.MusicLibrary)
-	ui.Success(fmt.Sprintf("done — %d moved, %d already correct, %d failed", moved, skipped, failed))
+	ui.Success(fmt.Sprintf("done: %d moved, %d already correct, %d failed", moved, skipped, failed))
 	return nil
 }
 
@@ -214,17 +290,6 @@ func copyFile(src, dst string) error {
 	}
 	defer out.Close()
 
-	buf := make([]byte, 32*1024)
-	for {
-		n, err := in.Read(buf)
-		if n > 0 {
-			if _, werr := out.Write(buf[:n]); werr != nil {
-				return werr
-			}
-		}
-		if err != nil {
-			break
-		}
-	}
-	return nil
+	_, err = io.Copy(out, in)
+	return err
 }

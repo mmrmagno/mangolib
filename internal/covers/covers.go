@@ -7,16 +7,19 @@ import (
 	"net/http"
 	"net/url"
 	"strings"
+	"time"
 )
 
+const userAgent = "mangolib/0.1.0 (https://github.com/mmrmagno/mangolib)"
+
 // Fetch returns album art bytes for the given artist+album.
-// Tries iTunes Search API first (more reliable), then Cover Art Archive.
-// Returns nil, nil if no art is found (not an error).
-func Fetch(artist, album string, size int) ([]byte, string, error) {
-	if data, mime, err := fetchITunes(artist, album, size); err == nil && data != nil {
+// Tries iTunes Search API first, then MusicBrainz / Cover Art Archive.
+// Returns nil, nil, nil if no art is found anywhere.
+func Fetch(artist, album string) ([]byte, string, error) {
+	if data, mime, err := fetchITunes(artist, album); err == nil && data != nil {
 		return data, mime, nil
 	}
-	if data, mime, err := fetchCoverArtArchive(artist, album); err == nil && data != nil {
+	if data, mime, err := fetchMusicBrainz(artist, album); err == nil && data != nil {
 		return data, mime, nil
 	}
 	return nil, "", nil
@@ -24,7 +27,7 @@ func Fetch(artist, album string, size int) ([]byte, string, error) {
 
 // --- iTunes Search API ---
 
-func fetchITunes(artist, album string, size int) ([]byte, string, error) {
+func fetchITunes(artist, album string) ([]byte, string, error) {
 	query := url.QueryEscape(artist + " " + album)
 	apiURL := fmt.Sprintf("https://itunes.apple.com/search?term=%s&entity=album&limit=5", query)
 
@@ -36,8 +39,6 @@ func fetchITunes(artist, album string, size int) ([]byte, string, error) {
 
 	var result struct {
 		Results []struct {
-			ArtistName  string `json:"artistName"`
-			CollectionName string `json:"collectionName"`
 			ArtworkUrl100 string `json:"artworkUrl100"`
 		} `json:"results"`
 	}
@@ -49,24 +50,28 @@ func fetchITunes(artist, album string, size int) ([]byte, string, error) {
 		if r.ArtworkUrl100 == "" {
 			continue
 		}
-		// Scale the artwork URL to requested size.
-		imgURL := strings.Replace(r.ArtworkUrl100, "100x100", fmt.Sprintf("%dx%d", size, size), 1)
-		data, mime, err := fetchImage(imgURL)
-		if err == nil && data != nil {
+		// Request the largest available size from Apple's CDN; ffmpeg will downscale.
+		imgURL := strings.Replace(r.ArtworkUrl100, "100x100", "3000x3000", 1)
+		if data, mime, err := fetchImage(imgURL); err == nil && data != nil {
 			return data, mime, nil
 		}
 	}
-	return nil, "", nil
+	return nil, "", fmt.Errorf("no iTunes results")
 }
 
-// --- Cover Art Archive (MusicBrainz) ---
+// --- MusicBrainz + Cover Art Archive ---
 
-func fetchCoverArtArchive(artist, album string) ([]byte, string, error) {
-	query := url.QueryEscape(fmt.Sprintf("artist:%s release:%s", artist, album))
-	mbURL := fmt.Sprintf("https://musicbrainz.org/ws/2/release/?query=%s&fmt=json&limit=3", query)
+func fetchMusicBrainz(artist, album string) ([]byte, string, error) {
+	// Search release-groups (canonical per-album entity, not per-edition).
+	// MusicBrainz requires rate-limiting to 1 req/sec for anonymous access.
+	time.Sleep(1 * time.Second)
+
+	query := url.QueryEscape(fmt.Sprintf(`artist:"%s" AND releasegroup:"%s"`, artist, album))
+	mbURL := fmt.Sprintf("https://musicbrainz.org/ws/2/release-group/?query=%s&fmt=json&limit=5", query)
 
 	req, _ := http.NewRequest("GET", mbURL, nil)
-	req.Header.Set("User-Agent", "mangolib/1.0 (https://github.com/mmrmagno/mangolib)")
+	req.Header.Set("User-Agent", userAgent)
+
 	resp, err := http.DefaultClient.Do(req)
 	if err != nil {
 		return nil, "", err
@@ -74,28 +79,30 @@ func fetchCoverArtArchive(artist, album string) ([]byte, string, error) {
 	defer resp.Body.Close()
 
 	var mbResult struct {
-		Releases []struct {
+		ReleaseGroups []struct {
 			ID string `json:"id"`
-		} `json:"releases"`
+		} `json:"release-groups"`
 	}
-	if err := json.NewDecoder(resp.Body).Decode(&mbResult); err != nil || len(mbResult.Releases) == 0 {
+	if err := json.NewDecoder(resp.Body).Decode(&mbResult); err != nil || len(mbResult.ReleaseGroups) == 0 {
 		return nil, "", fmt.Errorf("no MusicBrainz results")
 	}
 
-	for _, rel := range mbResult.Releases {
-		imgURL := fmt.Sprintf("https://coverartarchive.org/release/%s/front", rel.ID)
-		data, mime, err := fetchImage(imgURL)
-		if err == nil && data != nil {
+	for _, rg := range mbResult.ReleaseGroups {
+		imgURL := fmt.Sprintf("https://coverartarchive.org/release-group/%s/front", rg.ID)
+		if data, mime, err := fetchImage(imgURL); err == nil && data != nil {
 			return data, mime, nil
 		}
 	}
-	return nil, "", nil
+	return nil, "", fmt.Errorf("no cover art in Cover Art Archive")
 }
 
 // --- helpers ---
 
 func fetchImage(imgURL string) ([]byte, string, error) {
-	resp, err := http.Get(imgURL)
+	req, _ := http.NewRequest("GET", imgURL, nil)
+	req.Header.Set("User-Agent", userAgent)
+
+	resp, err := http.DefaultClient.Do(req)
 	if err != nil {
 		return nil, "", err
 	}

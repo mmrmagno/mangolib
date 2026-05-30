@@ -3,13 +3,15 @@ package main
 import (
 	"fmt"
 	"os"
+	"os/signal"
 	"path/filepath"
 	"strings"
+	"syscall"
 
+	"github.com/mmrmagno/mangolib/internal/catalog"
 	"github.com/mmrmagno/mangolib/internal/config"
 	"github.com/mmrmagno/mangolib/internal/covers"
 	"github.com/mmrmagno/mangolib/internal/download"
-	"github.com/mmrmagno/mangolib/internal/catalog"
 	"github.com/mmrmagno/mangolib/internal/ipod"
 	"github.com/mmrmagno/mangolib/internal/ui"
 	"github.com/mmrmagno/mangolib/internal/ytdlp"
@@ -19,8 +21,10 @@ import (
 var version = "dev"
 
 func main() {
-	ui.Banner()
-	fmt.Println()
+	printBanner := func() {
+		ui.Banner(version)
+		fmt.Println()
+	}
 
 	root := &cobra.Command{
 		Use:           "mangolib",
@@ -28,7 +32,26 @@ func main() {
 		Version:       version,
 		SilenceUsage:  true,
 		SilenceErrors: true,
+		// Show banner + help when running bare `mangolib` with no subcommand.
+		Run: func(cmd *cobra.Command, args []string) {
+			cmd.Help()
+		},
+		// PersistentPreRun fires for subcommands. Skip for root — Help() handles it there.
+		PersistentPreRun: func(cmd *cobra.Command, args []string) {
+			if cmd.HasParent() {
+				printBanner()
+			}
+		},
 	}
+
+	// Override help to include the banner.
+	root.SetHelpFunc(func(cmd *cobra.Command, args []string) {
+		printBanner()
+		cmd.Usage()
+	})
+
+	root.PersistentFlags().BoolVarP(&ui.Verbose, "verbose", "v", false, "show raw output from yt-dlp, ffmpeg, rsync")
+	root.PersistentFlags().StringVar(&config.ConfigPath, "config", "", "path to config file (default ~/.config/mangolib/mangolib.toml)")
 
 	root.AddCommand(
 		cmdInit(),
@@ -40,6 +63,15 @@ func main() {
 		cmdDownload(),
 		cmdUpdate(),
 	)
+
+	// Catch SIGINT/SIGTERM and exit cleanly (Bubble Tea restores terminal on its own).
+	sigCh := make(chan os.Signal, 1)
+	signal.Notify(sigCh, os.Interrupt, syscall.SIGTERM)
+	go func() {
+		<-sigCh
+		fmt.Fprintln(os.Stderr, ui.Dim("cancelled"))
+		os.Exit(130)
+	}()
 
 	if err := root.Execute(); err != nil {
 		ui.Fatal(err.Error())
@@ -88,35 +120,28 @@ func cmdImport() *cobra.Command {
 	}
 }
 
-func cmdReorganize() *cobra.Command {
-	return &cobra.Command{
-		Use:   "reorganize",
-		Short: "Reorganize existing library into Artist/Album/Track folder structure using embedded tags",
-		RunE: func(cmd *cobra.Command, args []string) error {
-			return catalog.ScanAndTag(loadCfg())
-		},
-	}
-}
-
 func cmdGetCovers() *cobra.Command {
-	return &cobra.Command{
+	var force bool
+	cmd := &cobra.Command{
 		Use:   "get-covers",
 		Short: "Fetch and embed missing album art for every track in the library",
 		RunE: func(cmd *cobra.Command, args []string) error {
 			cfg := loadCfg()
-			runGetCovers(cfg)
+			runGetCovers(cfg, force)
 			return nil
 		},
 	}
+	cmd.Flags().BoolVar(&force, "force", false, "re-fetch and overwrite existing cover.jpg files")
+	return cmd
 }
 
-func runGetCovers(cfg *config.Config) {
+func runGetCovers(cfg *config.Config, force bool) {
 	size := cfg.Covers.Size
 	if size == 0 {
 		size = 500
 	}
 
-	found, embedded, skipped := 0, 0, 0
+	found, embedded, skipped, coverFiles := 0, 0, 0, 0
 
 	_ = filepath.Walk(cfg.MusicLibrary, func(path string, info os.FileInfo, err error) error {
 		if err != nil || info.IsDir() {
@@ -128,9 +153,13 @@ func runGetCovers(cfg *config.Config) {
 		}
 		found++
 
-		if catalog.HasEmbeddedCover(path) {
-			skipped++
-			return nil
+		// Skip if cover.jpg already exists and not forcing.
+		coverPath := filepath.Join(filepath.Dir(path), "cover.jpg")
+		if !force {
+			if _, err := os.Stat(coverPath); err == nil {
+				skipped++
+				return nil
+			}
 		}
 
 		meta := catalog.ReadTags(path)
@@ -138,8 +167,9 @@ func runGetCovers(cfg *config.Config) {
 			return nil
 		}
 
-		art, mime, err := covers.Fetch(meta.Artist, meta.Album, size)
+		art, mime, err := covers.Fetch(meta.Artist, meta.Album)
 		if err != nil || art == nil {
+			ui.Warn(fmt.Sprintf("no cover found: %s - %s", meta.Artist, meta.Album))
 			return nil
 		}
 
@@ -156,23 +186,85 @@ func runGetCovers(cfg *config.Config) {
 			ui.Warn(fmt.Sprintf("embed failed for %s: %v", filepath.Base(path), err))
 			return nil
 		}
+		if err := catalog.WriteCoverFile(filepath.Dir(path), art, size, true); err == nil {
+			coverFiles++
+		}
 		ui.Success(fmt.Sprintf("cover embedded: %s", filepath.Base(path)))
 		embedded++
 		return nil
 	})
 
-	ui.Success(fmt.Sprintf("%d tracks scanned — %d covers embedded, %d already had art", found, embedded, skipped))
+	ui.Success(fmt.Sprintf("%d tracks scanned: %d covers fetched and embedded, %d skipped (cover.jpg exists), %d cover.jpg written for Rockbox", found, embedded, skipped, coverFiles))
 }
 
 func cmdSync() *cobra.Command {
-	return &cobra.Command{
+	var fromIPod bool
+	var dryRun bool
+
+	cmd := &cobra.Command{
 		Use:   "sync",
-		Short: "Sync music library to iPod",
+		Short: "Sync music library to iPod (or use --from-ipod to pull from iPod to library)",
 		RunE: func(cmd *cobra.Command, args []string) error {
 			cfg := loadCfg()
-			return ipod.Sync(cfg)
+			if fromIPod {
+				if err := ui.RunWithSpinner("Syncing from iPod...", func() error {
+					return ipod.SyncFrom(cfg, dryRun)
+				}); err != nil {
+					return err
+				}
+				if dryRun {
+					ui.Success("Dry run complete — no files changed")
+					return nil
+				}
+				if err := ui.RunWithSpinner("Reorganizing imported files...", func() error {
+					return catalog.ScanAndTag(cfg)
+				}); err != nil {
+					return err
+				}
+				ui.Success("Import from iPod complete")
+				return nil
+			}
+			if err := ui.RunWithSpinner("Syncing to iPod...", func() error {
+				return ipod.Sync(cfg, dryRun)
+			}); err != nil {
+				return err
+			}
+			if dryRun {
+				ui.Success("Dry run complete — no files changed")
+			} else {
+				ui.Success("Sync complete")
+			}
+			return nil
 		},
 	}
+
+	cmd.Flags().BoolVar(&fromIPod, "from-ipod", false, "pull music from iPod into the library and reorganize")
+	cmd.Flags().BoolVar(&dryRun, "dry-run", false, "show what would be synced without transferring files")
+	return cmd
+}
+
+func cmdReorganize() *cobra.Command {
+	var clean bool
+	cmd := &cobra.Command{
+		Use:   "reorganize",
+		Short: "Reorganize library into Artist/Album/Track structure; use --clean to fix YouTube title noise",
+		RunE: func(cmd *cobra.Command, args []string) error {
+			cfg := loadCfg()
+			if clean {
+				if err := ui.RunWithSpinner("Cleaning YouTube title noise...", func() error {
+					return catalog.CleanLibraryTitles(cfg)
+				}); err != nil {
+					return err
+				}
+				ui.Success("Titles cleaned")
+			}
+			return ui.RunWithSpinner("Reorganizing library...", func() error {
+				return catalog.ScanAndTag(cfg)
+			})
+		},
+	}
+	cmd.Flags().BoolVar(&clean, "clean", false, "strip YouTube title noise from all track titles before reorganizing")
+	return cmd
 }
 
 func cmdDownload() *cobra.Command {
@@ -221,7 +313,7 @@ func cmdDownload() *cobra.Command {
 			if err := d.Download(url, cfg); err != nil {
 				return err
 			}
-			runGetCovers(cfg)
+			runGetCovers(cfg, false)
 			return nil
 		},
 	}

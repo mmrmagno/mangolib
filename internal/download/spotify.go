@@ -50,10 +50,25 @@ func (s Spotify) Download(rawURL string, cfg *config.Config) error {
 		return fmt.Errorf("resolving Spotify URL: %w", err)
 	}
 
-	ui.Step(fmt.Sprintf("Found %d track(s) on Spotify", len(tracks)))
+	// Single track: spinner. Multiple tracks: progress bar.
+	albumLabel := "Downloading"
+	if len(tracks) > 0 && tracks[0].Album.Name != "" {
+		albumLabel = tracks[0].Album.Name
+	}
+	var tp *ui.TrackProgress
+	if len(tracks) == 1 {
+		artist := ""
+		if len(tracks[0].Artists) > 0 {
+			artist = tracks[0].Artists[0].Name
+		}
+		ui.Step(fmt.Sprintf("%s — %s", artist, tracks[0].Name))
+	} else {
+		tp = ui.NewTrackProgress(albumLabel, len(tracks))
+	}
 
 	tmpDir, err := os.MkdirTemp("", "mangolib-spotify-*")
 	if err != nil {
+		tp.Done()
 		return fmt.Errorf("creating temp dir: %w", err)
 	}
 	defer os.RemoveAll(tmpDir)
@@ -69,11 +84,11 @@ func (s Spotify) Download(rawURL string, cfg *config.Config) error {
 
 	failed := 0
 	for i, t := range tracks {
+		_ = i
 		artist := ""
 		if len(t.Artists) > 0 {
 			artist = t.Artists[0].Name
 		}
-		ui.Step(fmt.Sprintf("[%d/%d] %s — %s", i+1, len(tracks), artist, t.Name))
 
 		// yt-dlp output template — the %% escapes the yt-dlp %(ext)s placeholder.
 		outTmpl := filepath.Join(tmpDir, fmt.Sprintf("%02d. %s - %s.%%(ext)s",
@@ -90,7 +105,7 @@ func (s Spotify) Download(rawURL string, cfg *config.Config) error {
 		}
 
 		if err := ytdlp.Run(args...); err != nil {
-			ui.Warn(fmt.Sprintf("failed to download %q: %v", t.Name, err))
+			ui.Warn(fmt.Sprintf("[%s] download failed: %v", t.Name, err))
 			failed++
 			continue
 		}
@@ -134,14 +149,15 @@ func (s Spotify) Download(rawURL string, cfg *config.Config) error {
 		}
 
 		// Move into MusicLibrary/Artist/Album/NN. Title.ext
-		dest, err := catalog.OrganizeFile(downloaded, cfg.MusicLibrary, meta)
-		if err != nil {
+		if _, err := catalog.OrganizeFile(downloaded, cfg.MusicLibrary, meta); err != nil {
 			ui.Warn(fmt.Sprintf("organize failed for %q: %v", t.Name, err))
 			failed++
 			continue
 		}
-		ui.Success(fmt.Sprintf("saved: %s", strings.TrimPrefix(dest, cfg.MusicLibrary+"/")))
+		tp.Track(t.Name)
 	}
+
+	tp.Done()
 
 	if failed == len(tracks) {
 		return fmt.Errorf("all %d downloads failed", failed)
@@ -149,6 +165,7 @@ func (s Spotify) Download(rawURL string, cfg *config.Config) error {
 	if failed > 0 {
 		ui.Warn(fmt.Sprintf("%d/%d tracks failed", failed, len(tracks)))
 	}
+	ui.Success(fmt.Sprintf("Downloaded %d/%d tracks", len(tracks)-failed, len(tracks)))
 	return nil
 }
 
