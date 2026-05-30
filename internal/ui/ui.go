@@ -51,7 +51,7 @@ var (
 
 func Banner(version string) {
 	title := styleBannerTitle.Render("🥭 mangolib") +
-		"  " + styleDim.Render("v"+version)
+		"  " + styleDim.Render(version)
 	sub := styleDim.Render("music · download · sync")
 	fmt.Println(styleBannerBox.Render(title + "\n" + sub))
 }
