@@ -1,0 +1,42 @@
+name: AUR Publish
+
+on:
+  workflow_run:
+    workflows: ["Release"]
+    types: [completed]
+
+jobs:
+  aur-publish:
+    runs-on: ubuntu-latest
+    if: ${{ github.event.workflow_run.conclusion == 'success' }}
+
+    steps:
+      - uses: actions/checkout@v4
+
+      - name: Get tag
+        id: tag
+        run: |
+          TAG=$(git ls-remote --tags origin | grep ${{ github.event.workflow_run.head_sha }} | awk '{print $2}' | sed 's|refs/tags/||' | grep -v '\^{}' | head -1)
+          echo "tag=$TAG" >> $GITHUB_OUTPUT
+          echo "pkgver=${TAG#v}" >> $GITHUB_OUTPUT
+
+      - name: Update PKGBUILD
+        run: |
+          TAG=${{ steps.tag.outputs.tag }}
+          PKGVER=${{ steps.tag.outputs.pkgver }}
+          curl -fsSL "https://github.com/${{ github.repository }}/releases/download/${TAG}/sha256sums.txt" -o sha256sums.txt
+          SUM_AMD64=$(grep "linux-amd64" sha256sums.txt | awk '{print $1}')
+          SUM_ARM64=$(grep "linux-arm64" sha256sums.txt | awk '{print $1}')
+          sed -i "s/^pkgver=.*/pkgver=${PKGVER}/" aur/PKGBUILD
+          sed -i "s/^sha256sums_x86_64=.*/sha256sums_x86_64=('${SUM_AMD64}')/" aur/PKGBUILD
+          sed -i "s/^sha256sums_aarch64=.*/sha256sums_aarch64=('${SUM_ARM64}')/" aur/PKGBUILD
+
+      - uses: KSXGitHub/github-actions-deploy-aur@v4.1.3
+        with:
+          pkgname: mangolib-bin
+          pkgbuild: aur/PKGBUILD
+          commit_username: ${{ secrets.AUR_USERNAME }}
+          commit_email: ${{ secrets.AUR_EMAIL }}
+          ssh_private_key: ${{ secrets.AUR_SSH_PRIVATE_KEY }}
+          commit_message: "upgrade: mangolib-bin ${{ steps.tag.outputs.tag }}"
+          ssh_keyscan_types: rsa,ecdsa,ed25519
