@@ -5,6 +5,7 @@ import (
 	"fmt"
 	"os"
 	"path/filepath"
+	"regexp"
 	"strings"
 
 	"github.com/mmrmagno/mangolib/internal/catalog"
@@ -19,6 +20,7 @@ import (
 type Tidal struct{}
 
 func (t Tidal) Download(url string, cfg *config.Config) error {
+	url = normalizeTidalURL(url)
 	if err := streamrip.EnsureInstalled(); err != nil {
 		return err
 	}
@@ -79,4 +81,20 @@ func (t Tidal) Download(url string, cfg *config.Config) error {
 	}
 	ui.Success(fmt.Sprintf("Downloaded %d track(s) from Tidal", imported))
 	return nil
+}
+
+// tidalURLRe matches the resource type and id in any Tidal URL form, ignoring
+// subdomains (listen.), "browse/" prefixes, trailing path segments, and queries.
+var tidalURLRe = regexp.MustCompile(`(?i)(track|album|playlist|artist|video|mix)/([A-Za-z0-9-]+)`)
+
+// normalizeTidalURL rebuilds a canonical https://tidal.com/<type>/<id> URL.
+// streamrip's URL parser mis-handles trailing segments (e.g. ".../track/123/u"
+// is read as id "u"), so we strip everything but the resource type and id.
+// Returns the input unchanged if no Tidal resource is recognized.
+func normalizeTidalURL(raw string) string {
+	m := tidalURLRe.FindStringSubmatch(raw)
+	if m == nil {
+		return raw
+	}
+	return fmt.Sprintf("https://tidal.com/%s/%s", strings.ToLower(m[1]), m[2])
 }

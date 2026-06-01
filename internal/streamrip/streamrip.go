@@ -37,11 +37,17 @@ func QualityArg(q string) string {
 
 // buildRipArgs assembles the `rip` argument vector. Global flags MUST precede
 // the `url` subcommand (streamrip uses a click group).
+//
+// --no-db disables streamrip's persistent "already downloaded" database: mangolib
+// downloads into an ephemeral temp dir and does its own library dedup via
+// catalog.OrganizeFile + Library.DuplicateAction, so streamrip's DB would only
+// cause re-downloads to be silently skipped.
 func buildRipArgs(configPath, folder, quality, url string) []string {
 	return []string{
 		"--config-path", configPath,
 		"--folder", folder,
 		"--quality", quality,
+		"--no-db",
 		"url", url,
 	}
 }

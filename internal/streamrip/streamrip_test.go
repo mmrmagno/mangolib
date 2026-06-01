@@ -30,6 +30,7 @@ func TestBuildRipArgs(t *testing.T) {
 		"--config-path", "/cfg/streamrip.toml",
 		"--folder", "/tmp/out",
 		"--quality", "3",
+		"--no-db",
 		"url", "https://tidal.com/album/123",
 	}
 	if !reflect.DeepEqual(got, want) {
