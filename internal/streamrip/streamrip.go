@@ -121,6 +121,52 @@ func Download(ctx context.Context, configPath, folder, quality, url string) erro
 	return cmd.Run()
 }
 
+// disableVideos sets [tidal] download_videos = false in a streamrip config,
+// preserving all other keys (including stored auth tokens). Idempotent.
+func disableVideos(data []byte) ([]byte, error) {
+	var cfg map[string]any
+	if err := toml.Unmarshal(data, &cfg); err != nil {
+		return nil, err
+	}
+	tidal, ok := cfg["tidal"].(map[string]any)
+	if !ok {
+		tidal = map[string]any{}
+		cfg["tidal"] = tidal
+	}
+	tidal["download_videos"] = false
+	return toml.Marshal(cfg)
+}
+
+// EnsureConfig makes sure streamrip's config exists at configPath and has video
+// downloads disabled (mangolib is an audio library). Safe to call repeatedly.
+func EnsureConfig(configPath string) error {
+	if !fileExists(configPath) {
+		bin, err := Locate()
+		if err != nil {
+			return err
+		}
+		// `rip config path` makes streamrip write its default config to
+		// configPath (its group callback auto-creates it) non-interactively.
+		cmd := exec.Command(bin, "--config-path", configPath, "config", "path")
+		if ui.Verbose {
+			cmd.Stdout = os.Stdout
+			cmd.Stderr = os.Stderr
+		}
+		if err := cmd.Run(); err != nil {
+			return fmt.Errorf("initializing streamrip config: %w", err)
+		}
+	}
+	data, err := os.ReadFile(configPath)
+	if err != nil {
+		return fmt.Errorf("reading streamrip config: %w", err)
+	}
+	out, err := disableVideos(data)
+	if err != nil {
+		return fmt.Errorf("updating streamrip config: %w", err)
+	}
+	return os.WriteFile(configPath, out, 0644)
+}
+
 func fileExists(p string) bool {
 	_, err := os.Stat(p)
 	return err == nil

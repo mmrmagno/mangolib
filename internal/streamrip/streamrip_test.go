@@ -2,6 +2,7 @@ package streamrip
 
 import (
 	"reflect"
+	"strings"
 	"testing"
 )
 
@@ -33,6 +34,27 @@ func TestBuildRipArgs(t *testing.T) {
 	}
 	if !reflect.DeepEqual(got, want) {
 		t.Fatalf("buildRipArgs() = %v, want %v", got, want)
+	}
+}
+
+func TestDisableVideos(t *testing.T) {
+	in := []byte("[tidal]\nquality = 3\ndownload_videos = true\naccess_token = \"tok123\"\n\n[downloads]\nfolder = \"/x\"\n")
+	out, err := disableVideos(in)
+	if err != nil {
+		t.Fatalf("disableVideos: %v", err)
+	}
+	got := string(out)
+	if !strings.Contains(got, "download_videos = false") {
+		t.Errorf("expected download_videos = false, got:\n%s", got)
+	}
+	// must preserve the existing access token (do not clobber auth)
+	if !strings.Contains(got, "tok123") {
+		t.Errorf("expected access_token preserved, got:\n%s", got)
+	}
+	// re-running is idempotent
+	out2, err := disableVideos(out)
+	if err != nil || !strings.Contains(string(out2), "download_videos = false") {
+		t.Errorf("not idempotent: err=%v out=%s", err, out2)
 	}
 }
 

@@ -28,6 +28,10 @@ func (t Tidal) Download(url string, cfg *config.Config) error {
 		return fmt.Errorf("creating streamrip config dir: %w", err)
 	}
 
+	if err := streamrip.EnsureConfig(cfgPath); err != nil {
+		return err
+	}
+
 	if !streamrip.IsAuthenticated(cfgPath) {
 		ui.Step("Tidal login required — follow streamrip's prompt to authorize this device.")
 	}
