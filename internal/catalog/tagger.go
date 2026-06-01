@@ -277,3 +277,8 @@ func SanitizePathPublic(s string) string {
 	s = strings.Trim(s, ".")
 	return s
 }
+
+// IsAudioFile reports whether path has a recognized audio extension.
+func IsAudioFile(path string) bool {
+	return audioExts[strings.ToLower(filepath.Ext(path))]
+}

@@ -4,10 +4,15 @@
 package streamrip
 
 import (
+	"context"
+	"fmt"
 	"os"
+	"os/exec"
 	"path/filepath"
 	"strings"
 
+	"github.com/mmrmagno/mangolib/internal/ui"
+	"github.com/mmrmagno/mangolib/internal/uv"
 	"github.com/pelletier/go-toml/v2"
 )
 
@@ -56,6 +61,69 @@ func IsAuthenticated(configPath string) bool {
 		return false
 	}
 	return isAuthenticatedFromTOML(data)
+}
+
+// ManagedPath is where `uv tool install streamrip` places the rip shim.
+func ManagedPath() string {
+	home, _ := os.UserHomeDir()
+	return filepath.Join(home, ".local", "bin", "rip")
+}
+
+// Locate finds the rip CLI: any existing install on PATH first (so we never
+// reinstall a streamrip the user already has), then the uv-managed shim.
+func Locate() (string, error) {
+	if p, err := exec.LookPath("rip"); err == nil {
+		return p, nil
+	}
+	if p := ManagedPath(); fileExists(p) {
+		return p, nil
+	}
+	return "", fmt.Errorf("rip (streamrip) not found")
+}
+
+// EnsureInstalled installs streamrip via uv only if rip is missing.
+func EnsureInstalled() error {
+	if _, err := Locate(); err == nil {
+		return nil
+	}
+	uvBin, err := uv.EnsureInstalled()
+	if err != nil {
+		return err
+	}
+	ui.Step("Installing streamrip via uv...")
+	cmd := exec.Command(uvBin, "tool", "install", "streamrip")
+	if ui.Verbose {
+		cmd.Stdout = os.Stdout
+		cmd.Stderr = os.Stderr
+	}
+	if err := cmd.Run(); err != nil {
+		return fmt.Errorf("installing streamrip: %w (try manually: uv tool install streamrip)", err)
+	}
+	if _, err := Locate(); err != nil {
+		return fmt.Errorf("streamrip installed but rip not found — ensure ~/.local/bin is on PATH")
+	}
+	ui.Success("streamrip installed")
+	return nil
+}
+
+// Download runs `rip url` with the terminal attached so streamrip shows its own
+// progress and, on first use with no stored token, drives the Tidal OAuth
+// device-code login (prints a verification URL/code and waits for the user).
+func Download(ctx context.Context, configPath, folder, quality, url string) error {
+	bin, err := Locate()
+	if err != nil {
+		return err
+	}
+	cmd := exec.CommandContext(ctx, bin, buildRipArgs(configPath, folder, quality, url)...)
+	cmd.Stdin = os.Stdin
+	cmd.Stdout = os.Stdout
+	cmd.Stderr = os.Stderr
+	return cmd.Run()
+}
+
+func fileExists(p string) bool {
+	_, err := os.Stat(p)
+	return err == nil
 }
 
 func isAuthenticatedFromTOML(data []byte) bool {
