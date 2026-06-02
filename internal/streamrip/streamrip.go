@@ -6,6 +6,7 @@ package streamrip
 import (
 	"context"
 	"fmt"
+	"io"
 	"os"
 	"os/exec"
 	"path/filepath"
@@ -97,13 +98,20 @@ func EnsureInstalled() error {
 		return err
 	}
 	ui.Step("Installing streamrip via uv...")
-	cmd := exec.Command(uvBin, "tool", "install", "streamrip")
-	if ui.Verbose {
-		cmd.Stdout = os.Stdout
-		cmd.Stderr = os.Stderr
-	}
+	// Install from git: PyPI has 2.1.0 which has broken Tidal OAuth credentials.
+	// The fix landed in 2.2.0 (git HEAD) but is not yet published to PyPI.
+	// CFLAGS: pillow 10.x uses function pointer signatures that gcc 14+ treats as
+	// hard errors; downgrading to a warning lets it compile without changing behaviour.
+	cmd := exec.Command(uvBin, "tool", "install", "git+https://github.com/nathom/streamrip")
+	cmd.Env = append(os.Environ(), "CFLAGS=-Wno-error=incompatible-pointer-types")
+	cmd.Stdout = os.Stdout
+	cmd.Stderr = os.Stderr
 	if err := cmd.Run(); err != nil {
-		return fmt.Errorf("installing streamrip: %w (try manually: uv tool install streamrip)", err)
+		return fmt.Errorf(
+			"streamrip auto-install failed\n" +
+				"  Arch Linux:  yay -S streamrip-git\n" +
+				"  macOS/other: uv tool install streamrip",
+		)
 	}
 	if _, err := Locate(); err != nil {
 		return fmt.Errorf("streamrip installed but rip not found — ensure ~/.local/bin is on PATH")
@@ -115,15 +123,22 @@ func EnsureInstalled() error {
 // Download runs `rip url` with the terminal attached so streamrip shows its own
 // progress and, on first use with no stored token, drives the Tidal OAuth
 // device-code login (prints a verification URL/code and waits for the user).
-func Download(ctx context.Context, configPath, folder, quality, url string) error {
+// authenticated=false forces output visible regardless of ui.Verbose so the
+// OAuth device-code prompt always reaches the user.
+func Download(ctx context.Context, configPath, folder, quality, url string, authenticated bool) error {
 	bin, err := Locate()
 	if err != nil {
 		return err
 	}
 	cmd := exec.CommandContext(ctx, bin, buildRipArgs(configPath, folder, quality, url)...)
 	cmd.Stdin = os.Stdin
-	cmd.Stdout = os.Stdout
-	cmd.Stderr = os.Stderr
+	if !authenticated || ui.Verbose {
+		cmd.Stdout = os.Stdout
+		cmd.Stderr = os.Stderr
+	} else {
+		cmd.Stdout = io.Discard
+		cmd.Stderr = io.Discard
+	}
 	return cmd.Run()
 }
 

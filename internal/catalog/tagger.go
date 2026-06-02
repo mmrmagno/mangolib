@@ -168,7 +168,10 @@ func WriteTagsMP3(path string, meta TrackMeta) error {
 // WriteTagsFFmpeg writes metadata into an M4A/FLAC file via ffmpeg.
 // If meta.CoverArt is set, it is embedded as attached art.
 func WriteTagsFFmpeg(path string, meta TrackMeta) error {
-	tmp := path + ".tmp"
+	// Keep the original extension so ffmpeg can infer the container format.
+	// song.m4a.tmp → unknown format; song.tmp.m4a → mp4 container. Same for .flac.
+	ext := filepath.Ext(path)
+	tmp := strings.TrimSuffix(path, ext) + ".tmp" + ext
 
 	var args []string
 	if len(meta.CoverArt) > 0 {

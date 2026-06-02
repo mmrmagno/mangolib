@@ -141,7 +141,7 @@ func runGetCovers(cfg *config.Config, force bool) {
 		size = 500
 	}
 
-	found, embedded, skipped, coverFiles := 0, 0, 0, 0
+	found, extracted, fetched, skipped, coverFiles := 0, 0, 0, 0, 0
 
 	_ = filepath.Walk(cfg.MusicLibrary, func(path string, info os.FileInfo, err error) error {
 		if err != nil || info.IsDir() {
@@ -153,7 +153,6 @@ func runGetCovers(cfg *config.Config, force bool) {
 		}
 		found++
 
-		// Skip if cover.jpg already exists and not forcing.
 		coverPath := filepath.Join(filepath.Dir(path), "cover.jpg")
 		if !force {
 			if _, err := os.Stat(coverPath); err == nil {
@@ -162,6 +161,20 @@ func runGetCovers(cfg *config.Config, force bool) {
 			}
 		}
 
+		// If the file already has embedded art (Spotify, Tidal, manual), extract it
+		// directly for cover.jpg — no iTunes fetch needed and no risky re-embed.
+		if catalog.HasEmbeddedCover(path) {
+			m := catalog.ReadTags(path)
+			if len(m.CoverArt) > 0 {
+				if err := catalog.WriteCoverFile(filepath.Dir(path), m.CoverArt, size, force); err == nil {
+					coverFiles++
+				}
+			}
+			extracted++
+			return nil
+		}
+
+		// No embedded art — fetch from iTunes / MusicBrainz.
 		meta := catalog.ReadTags(path)
 		if meta.Artist == "" && meta.Album == "" {
 			return nil
@@ -176,25 +189,26 @@ func runGetCovers(cfg *config.Config, force bool) {
 		meta.CoverArt = art
 		meta.CoverMime = mime
 
+		var embedErr error
 		switch ext {
 		case ".mp3":
-			err = catalog.WriteTagsMP3(path, meta)
+			embedErr = catalog.WriteTagsMP3(path, meta)
 		default:
-			err = catalog.WriteTagsFFmpeg(path, meta)
+			embedErr = catalog.WriteTagsFFmpeg(path, meta)
 		}
-		if err != nil {
-			ui.Warn(fmt.Sprintf("embed failed for %s: %v", filepath.Base(path), err))
-			return nil
+		if embedErr != nil {
+			ui.Warn(fmt.Sprintf("cover embed failed for %s: %v", filepath.Base(path), embedErr))
+		} else {
+			ui.Success(fmt.Sprintf("cover embedded: %s", filepath.Base(path)))
+			fetched++
 		}
 		if err := catalog.WriteCoverFile(filepath.Dir(path), art, size, true); err == nil {
 			coverFiles++
 		}
-		ui.Success(fmt.Sprintf("cover embedded: %s", filepath.Base(path)))
-		embedded++
 		return nil
 	})
 
-	ui.Success(fmt.Sprintf("%d tracks scanned: %d covers fetched and embedded, %d skipped (cover.jpg exists), %d cover.jpg written for Rockbox", found, embedded, skipped, coverFiles))
+	ui.Success(fmt.Sprintf("%d tracks: %d covers fetched, %d extracted from tags, %d skipped, %d cover.jpg written", found, fetched, extracted, skipped, coverFiles))
 }
 
 func cmdSync() *cobra.Command {

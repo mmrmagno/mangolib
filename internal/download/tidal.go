@@ -34,7 +34,8 @@ func (t Tidal) Download(url string, cfg *config.Config) error {
 		return err
 	}
 
-	if !streamrip.IsAuthenticated(cfgPath) {
+	authenticated := streamrip.IsAuthenticated(cfgPath)
+	if !authenticated {
 		ui.Step("Tidal login required — follow streamrip's prompt to authorize this device.")
 	}
 
@@ -43,11 +44,21 @@ func (t Tidal) Download(url string, cfg *config.Config) error {
 		return fmt.Errorf("creating temp dir: %w", err)
 	}
 	defer os.RemoveAll(tmp)
-
 	quality := streamrip.QualityArg(cfg.Tidal.Quality)
-	ui.Step("Downloading from Tidal...")
-	if err := streamrip.Download(context.Background(), cfgPath, tmp, quality, url); err != nil {
-		return fmt.Errorf("streamrip download: %w", err)
+
+	// When not authenticated, streamrip needs a clean terminal for the OAuth device
+	// code flow (shows a URL + polls interactively). Skip the spinner in that case.
+	runDownload := func() error {
+		return streamrip.Download(context.Background(), cfgPath, tmp, quality, url, authenticated)
+	}
+	var dlErr error
+	if authenticated {
+		dlErr = ui.RunWithSpinner("Downloading from Tidal...", runDownload)
+	} else {
+		dlErr = runDownload()
+	}
+	if dlErr != nil {
+		return fmt.Errorf("streamrip download: %w", dlErr)
 	}
 
 	imported, failed := 0, 0
