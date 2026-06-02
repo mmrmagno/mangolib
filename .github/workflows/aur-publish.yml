@@ -16,7 +16,7 @@ jobs:
       - name: Get tag
         id: tag
         run: |
-          TAG=$(git ls-remote --tags origin | grep ${{ github.event.workflow_run.head_sha }} | awk '{print $2}' | sed 's|refs/tags/||' | grep -v '\^{}' | head -1)
+          TAG=${{ github.event.workflow_run.head_branch }}
           echo "tag=$TAG" >> $GITHUB_OUTPUT
           echo "pkgver=${TAG#v}" >> $GITHUB_OUTPUT
 
