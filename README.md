@@ -5,7 +5,7 @@
 <p align="center">
   A single-binary music library manager for people who actually own their music.
   <br/>
-  Download from Spotify &amp; YouTube, organize your collection, sync to your iPod.
+  Download from Spotify, YouTube &amp; Tidal, organize your collection, sync to your iPod.
 </p>
 
 <p align="center">
@@ -31,12 +31,13 @@
 
 - **Spotify:** resolves tracks, albums, and playlists via the Spotify Web API, searches YouTube for each track, downloads and tags with authoritative Spotify metadata
 - **YouTube:** direct video or playlist download; per-track progress bars for playlists; titles automatically stripped of channel prefixes (`Artist | Title`) and noise (`(Official Video)`, `(Audio)`, etc.)
+- **Tidal:** downloads tracks, albums, and playlists at HiFi / HiRes Lossless quality via [streamrip](https://github.com/nathom/streamrip); OAuth device-code login on first use; same progress bar UI as Spotify and YouTube
 - **Native tagging:** writes ID3v2 tags (MP3) and ffmpeg metadata (M4A / FLAC) directly, no external taggers
 - **Cover art:** fetches 3000×3000 art from iTunes (fallback: MusicBrainz), embeds in tags and writes a square-padded `cover.jpg` per album for Rockbox
 - **Library organization:** `Artist / Album / NN. Title.ext` structure enforced with `reorganize`; `reorganize --clean` fixes existing YouTube title noise
 - **iPod sync:** rsyncs your library to a Rockbox iPod; bidirectional (PC to iPod or iPod to PC); `--dry-run` to preview
 - **Styled terminal UI:** Catppuccin Mocha colours, animated spinners, and progress bars — use `-v` for raw subprocess output
-- **Self-managing:** downloads and updates `yt-dlp` automatically; no Python, no Docker
+- **Self-managing:** downloads and updates `yt-dlp` automatically; installs `streamrip` via `uv` on first Tidal use; no Python environment setup needed
 
 ---
 
@@ -46,6 +47,7 @@
 |---|---|
 | `ffmpeg` | `pacman -S ffmpeg` · `apt install ffmpeg` · `brew install ffmpeg` |
 | `yt-dlp` | Auto-downloaded by mangolib on first use |
+| `uv` + `streamrip` | Auto-installed by mangolib on first `--tidal` download (Tidal only) |
 
 ---
 
@@ -93,11 +95,16 @@ client_secret = "your_client_secret"
 audio_format  = "mp3"     # mp3 | m4a | flac
 audio_quality = "320"     # kbps
 
+[tidal]
+quality = "HI_RES_LOSSLESS"   # LOW | HIGH | LOSSLESS | HI_RES_LOSSLESS
+
 [covers]
 size = 500                # cover.jpg output size in px
 ```
 
 **Getting Spotify credentials:** create a free app at [developer.spotify.com/dashboard](https://developer.spotify.com/dashboard). No website or redirect URIs needed, just copy the client ID and secret.
+
+**Tidal login:** run `mangolib download --tidal <URL>` once — mangolib installs streamrip automatically and opens a Tidal device-code login in your browser. The token is stored in `~/.config/mangolib/streamrip.toml` and reused for all subsequent downloads.
 
 ---
 
@@ -109,10 +116,11 @@ mangolib [--verbose] <command> [flags]
 
 | Command | What it does |
 |---|---|
-| `download <URL>` | Auto-detect source and download (Spotify or YouTube) |
+| `download <URL>` | Auto-detect source and download (Spotify, YouTube, or Tidal) |
 | `download --spotify <URL>` | Spotify track / album / playlist: download + tag + cover |
 | `download --youtube <URL>` | YouTube video or playlist: audio + cover, titles auto-cleaned |
 | `download --youtube --album "Name" --artist "Name" <URL>` | Override album and artist for YouTube |
+| `download --tidal <URL>` | Tidal track / album / playlist at HiFi/HiRes quality |
 | `get-covers` | Fetch and embed missing album art for every track in the library |
 | `get-covers --force` | Re-fetch and overwrite all covers, replacing any bad art |
 | `reorganize` | Re-organize files into `Artist/Album/NN. Title.ext` using embedded tags |
@@ -125,7 +133,7 @@ mangolib [--verbose] <command> [flags]
 | `update` | Update yt-dlp to the latest release |
 | `init` | Scan and re-organize everything already in the library |
 
-Use `-v` / `--verbose` on any command to show raw output from yt-dlp, ffmpeg, and rsync.
+Use `-v` / `--verbose` on any command to show raw output from yt-dlp, ffmpeg, rsync, and streamrip.
 
 ### Examples
 
@@ -138,6 +146,9 @@ mangolib download https://youtube.com/playlist?list=...
 
 # Download a single YouTube video with explicit tags
 mangolib download --album "Dangerous" --artist "Michael Jackson" https://youtu.be/...
+
+# Download a Tidal album at HiRes quality (login prompt on first run)
+mangolib download https://tidal.com/album/...
 
 # Fix YouTube title noise on existing library tracks
 mangolib reorganize --clean
@@ -164,12 +175,12 @@ mangolib sync --dry-run
 
 - [x] Spotify download (track / album / playlist)
 - [x] YouTube download with progress bars and auto-cleaned titles
+- [x] Tidal download (track / album / playlist) at HiFi / HiRes Lossless quality
 - [x] Native ID3 / ffmpeg tagging
 - [x] Cover art: iTunes high-res + MusicBrainz fallback
 - [x] Rockbox `cover.jpg` support (resized, square-padded)
 - [x] Bidirectional iPod sync (`sync --from-ipod`)
 - [x] AUR package (`mangolib-bin`)
-- [ ] Tidal download
 - [ ] Bubble Tea TUI with progress bars and album art preview
 
 ---

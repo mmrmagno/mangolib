@@ -61,31 +61,54 @@ func (t Tidal) Download(url string, cfg *config.Config) error {
 		return fmt.Errorf("streamrip download: %w", dlErr)
 	}
 
-	imported, failed := 0, 0
-	walkErr := filepath.Walk(tmp, func(path string, info os.FileInfo, err error) error {
-		if err != nil || info.IsDir() {
-			return err
+	// Collect downloaded audio files before organizing so we know the total for
+	// the progress bar — same pattern as Spotify album / YouTube playlist.
+	var audioFiles []string
+	_ = filepath.Walk(tmp, func(path string, info os.FileInfo, err error) error {
+		if err == nil && !info.IsDir() && catalog.IsAudioFile(path) {
+			audioFiles = append(audioFiles, path)
 		}
-		if !catalog.IsAudioFile(path) {
-			return nil
-		}
-		meta := catalog.ReadTags(path)
-		dest, err := catalog.OrganizeFile(path, cfg.MusicLibrary, meta)
-		if err != nil {
-			ui.Warn(fmt.Sprintf("organize failed: %s: %v", filepath.Base(path), err))
-			failed++
-			return nil
-		}
-		ui.Success("imported: " + strings.TrimPrefix(dest, cfg.MusicLibrary+"/"))
-		imported++
 		return nil
 	})
-	if walkErr != nil {
-		return walkErr
+
+	if len(audioFiles) == 0 {
+		return fmt.Errorf("no audio files were downloaded from Tidal")
 	}
 
+	firstMeta := catalog.ReadTags(audioFiles[0])
+	albumLabel := firstMeta.Album
+	if albumLabel == "" {
+		albumLabel = "Tidal"
+	}
+
+	var tp *ui.TrackProgress
+	if len(audioFiles) == 1 {
+		label := firstMeta.Title
+		if firstMeta.Artist != "" && firstMeta.Title != "" {
+			label = firstMeta.Artist + " — " + firstMeta.Title
+		}
+		ui.Step(label)
+	} else {
+		tp = ui.NewTrackProgress(albumLabel, len(audioFiles))
+	}
+
+	failed := 0
+	for _, path := range audioFiles {
+		meta := catalog.ReadTags(path)
+		if _, err := catalog.OrganizeFile(path, cfg.MusicLibrary, meta); err != nil {
+			ui.Warn(fmt.Sprintf("organize failed: %s: %v", filepath.Base(path), err))
+			failed++
+			continue
+		}
+		if tp != nil {
+			tp.Track(meta.Title)
+		}
+	}
+	tp.Done()
+
+	imported := len(audioFiles) - failed
 	if imported == 0 {
-		return fmt.Errorf("no audio files were downloaded from Tidal")
+		return fmt.Errorf("no audio files could be organized from Tidal download")
 	}
 	if failed > 0 {
 		ui.Warn(fmt.Sprintf("%d file(s) failed to organize", failed))
